@@ -1,0 +1,54 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
+PROG=/usr/bin/sing-box
+RES_DIR=/etc/sing-box/
+CONF=./config.json
+
+start_service() {
+    procd_open_instance
+    procd_set_param command $PROG run -D $RES_DIR -c $CONF
+    procd_set_param user root
+    procd_set_param limits core="unlimited"
+    procd_set_param limits nofile="1000000 1000000"
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn "${respawn_threshold:-3600}" "${respawn_timeout:-5}" "${respawn_retry:-5}"
+    procd_close_instance
+
+    # 清理旧规则防止 File exists
+    ip rule del fwmark 1 table 100 2>/dev/null || true
+    ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
+
+    ip -6 rule del fwmark 1 table 106 2>/dev/null || true
+    ip -6 route del local ::/0 dev lo table 106 2>/dev/null || true
+
+    # 新增规则
+    ip rule add fwmark 1 table 100
+    ip route add local 0.0.0.0/0 dev lo table 100
+
+    ip -6 rule add fwmark 1 table 106
+    ip -6 route add local ::/0 dev lo table 106
+
+    # 执行iptables规则脚本
+    /etc/sing-box/iptables-tproxy.sh
+
+    echo "sing-box is started!"
+}
+
+stop_service() {
+    service_stop $PROG
+
+    ip rule del fwmark 1 table 100 2>/dev/null || true
+    ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null || true
+
+    ip -6 rule del fwmark 1 table 106 2>/dev/null || true
+    ip -6 route del local ::/0 dev lo table 106 2>/dev/null || true
+
+    /etc/sing-box/iptables-tproxy.sh stop
+
+    echo "sing-box is stopped!"
+}
+
